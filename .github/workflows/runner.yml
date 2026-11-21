@@ -65,9 +65,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: vladleopold/3Spine-core
-          ref: main
-          token: ${{ secrets.SOURCE_REPO_TOKEN }}
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
