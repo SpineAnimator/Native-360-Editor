@@ -18,6 +18,7 @@ on:
   push:
     branches: [main]
     paths:
+      - '.github/workflows/runner.yml'
       - .github/workflows/verify-volume360-editor-linux.yml
       - scripts/verify_volume360_editor_linux.py
       - scripts/audit_volume360_visual.py
