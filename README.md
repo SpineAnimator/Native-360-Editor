@@ -1,16 +1,15 @@
-# Native 360 Spine Editor — public runner
+# Public CI/CD execution endpoint
 
-Dedicated public GitHub Actions execution host for the real PSD → Spine ZIP → licensed Spine Editor 4.3.26 → 40-frame native render task.
+This repository contains only a minimal GitHub Actions runner wrapper.
+All source code, libraries, decoders/decompilers, tests, fixtures, and orchestration
+remain exclusively in the private `vladleopold/3Spine-core` repository.
 
-## Runner
-- GitHub-hosted `ubuntu-latest`
-- Workflow: `.github/workflows/runner.yml`
-- Manual and scheduled execution
-- The visual/unit audit scripts are mirrored in this repository; the private core workflow remains in `vladleopold/3Spine-core`.
+The ephemeral GitHub-hosted runner checks out only the required private paths at
+runtime. No source files are committed to this public repository and no source
+archive or source-code artifact is uploaded here.
 
-## Required repository secrets
-- `ACCESS_TOKEN`: read access to `SpineAnimator/spine-animator-private` and its Actions artifacts.
-- `SPINE_LICENSE`: licensed Spine Editor activation.
-- `SPINE_LINUX_URL`: authorized Linux distribution URL for Spine Editor 4.3.26.
+Required Actions secret: `SOURCE_REPO_TOKEN` with read-only access to
+`vladleopold/3Spine-core`.
 
-The synthetic visual-gate tests already run on the public runner. Native Editor execution cannot proceed until these credentials are configured. No local iMac execution is used.
+Dispatch payloads must contain task identifiers only, never source files,
+credentials, PSD bytes, library contents, or private implementation details.
