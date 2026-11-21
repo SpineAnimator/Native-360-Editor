@@ -8,6 +8,7 @@ name: Real 2Spine PSD 360 licensed Spine Editor 4.3.26 gate
 on:
   pull_request:
     paths:
+      - .github/workflows/runner.yml
       - .github/workflows/verify-volume360-editor-linux.yml
       - scripts/verify_volume360_editor_linux.py
       - scripts/audit_volume360_visual.py
@@ -37,6 +38,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+
+  runner-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Confirm public GitHub-hosted Linux runner allocation
+        run: |
+          set -euo pipefail
+          echo "repository=$GITHUB_REPOSITORY"
+          echo "runner=$RUNNER_NAME"
+          echo "os=$RUNNER_OS"
+          uname -a
+          df -h "$GITHUB_WORKSPACE"
+
   real-360-editor:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
