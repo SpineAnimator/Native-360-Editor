@@ -24,6 +24,70 @@ jobs:
           set -euo pipefail
           echo "Public ephemeral runner allocated: $RUNNER_NAME ($RUNNER_OS)"
           uname -s
+
+  archive-owner-isolation-smoke:
+    # This uses synthetic fingerprints only; never uploads PSD pixels or user projects.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify current private archive endpoint and recovery-key isolation
+        env:
+          ARCHIVE_URL: https://spine-archive.vladyslavchaplygin.workers.dev
+        run: |
+          node --input-type=module <<'NODE'
+          import {randomBytes} from 'node:crypto';
+          const base=process.env.ARCHIVE_URL;
+          const origin='https://spineanimator.github.io';
+          const call=async(path,opts={})=>{
+            const response=await fetch(base+path,{...opts,
+              headers:{origin,...(opts.headers||{})},signal:AbortSignal.timeout(15000)});
+            const value=await response.json().catch(()=>({}));
+            if(!response.ok)throw Error('Archive HTTP '+response.status+' at '+path+'; code '+(value.error?.code||'none'));
+            return value;
+          };
+          const health=await call('/api/health');
+          if(health.privateArchive!==true)throw Error('Current private archive is not ready');
+          const recover=randomBytes(32).toString('hex');
+          const sourceSha256=randomBytes(32).toString('hex');
+          const session=async(key)=>{
+            const value=await call('/api/session',{method:'POST',
+              headers:{'content-type':'application/json'},
+              body:JSON.stringify({recoveryKey:key})});
+            if(typeof value.token!=='string'||value.token.length<20)
+              throw Error('Archive did not issue a signed owner session');
+            return value.token;
+          };
+          const read=async(token)=>call('/api/motion-history?sourceSha256='+sourceSha256,{
+            headers:{authorization:'Bearer '+token}
+          });
+          const first=await session(recover);
+          const second=await session(recover);
+          const stranger=await session(randomBytes(32).toString('hex'));
+          const empty=await read(first);
+          if(empty.scope!=='authenticated-owner'||empty.synchronized!==true||empty.records.length)
+            throw Error('Fresh owner history is not empty or not synchronized');
+          const id='c2026_'+randomBytes(13).toString('hex');
+          const record={version:1,id,sourceSha256,createdAt:new Date().toISOString(),
+            fingerprints:[{version:1,clipId:'sa-wiki-ci-archive-smoke',
+              samples:9,selectedNodes:['root'],complete:true,vector:Array(36).fill(.125)}],
+            visualVerified:false};
+          const stored=await call('/api/motion-history',{method:'POST',
+            headers:{authorization:'Bearer '+first,'content-type':'application/json'},
+            body:JSON.stringify(record)});
+          if(stored.stored!==true)throw Error('Synthetic history record was not stored');
+          const recovered=await read(second);
+          if(!recovered.records.some(x=>x.id===id))throw Error('Same-owner recovery session did not recover the record');
+          const other=await read(stranger);
+          if(other.records.some(x=>x.id===id)||other.records.length)
+            throw Error('Motion history leaked across owners');
+          console.log('CURRENT_ARCHIVE_OWNER_ISOLATION_PASS',{
+            privateArchive:health.privateArchive===true,
+            sourceScoped:true,sameOwnerRecovery:true,otherOwnerIsolated:true,
+            records:recovered.records.length
+          });
+          NODE
+
   execute-private-checks:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
