@@ -1,5 +1,9 @@
 name: Private Native 360 executor
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/runner.yml
   pull_request:
     paths:
       - .github/workflows/runner.yml
