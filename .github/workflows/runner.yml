@@ -1,5 +1,12 @@
 name: Private Native 360 executor
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/runner.yml
+  pull_request:
+    paths:
+      - .github/workflows/runner.yml
   workflow_dispatch:
   repository_dispatch:
     types: [native-360-editor]
@@ -17,7 +24,136 @@ jobs:
           set -euo pipefail
           echo "Public ephemeral runner allocated: $RUNNER_NAME ($RUNNER_OS)"
           uname -s
+
+  archive-owner-isolation-smoke:
+    # This uses synthetic fingerprints only; never uploads PSD pixels or user projects.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify current private archive endpoint and recovery-key isolation
+        env:
+          ARCHIVE_URL: https://spine-archive.vladyslavchaplygin.workers.dev
+        run: |
+          node --input-type=module <<'NODE'
+          import {randomBytes} from 'node:crypto';
+          const base=process.env.ARCHIVE_URL;
+          const origin='https://spineanimator.github.io';
+          const call=async(path,opts={})=>{
+            const response=await fetch(base+path,{...opts,
+              headers:{origin,...(opts.headers||{})},signal:AbortSignal.timeout(15000)});
+            const value=await response.json().catch(()=>({}));
+            if(!response.ok)throw Error('Archive HTTP '+response.status+' at '+path+'; code '+(value.error?.code||'none'));
+            return value;
+          };
+          const health=await call('/api/health');
+          if(health.privateArchive!==true)throw Error('Current private archive is not ready');
+          const recover=randomBytes(32).toString('hex');
+          const sourceSha256=randomBytes(32).toString('hex');
+          const session=async(key)=>{
+            const value=await call('/api/session',{method:'POST',
+              headers:{'content-type':'application/json'},
+              body:JSON.stringify({recoveryKey:key})});
+            if(typeof value.token!=='string'||value.token.length<20)
+              throw Error('Archive did not issue a signed owner session');
+            return value.token;
+          };
+          const read=async(token)=>call('/api/motion-history?sourceSha256='+sourceSha256,{
+            headers:{authorization:'Bearer '+token}
+          });
+          const first=await session(recover);
+          const second=await session(recover);
+          const stranger=await session(randomBytes(32).toString('hex'));
+          const empty=await read(first);
+          if(empty.scope!=='authenticated-owner'||empty.synchronized!==true||empty.records.length)
+            throw Error('Fresh owner history is not empty or not synchronized');
+          const id='c2026_'+randomBytes(13).toString('hex');
+          const record={version:1,id,sourceSha256,createdAt:new Date().toISOString(),
+            fingerprints:[{version:1,clipId:'sa-wiki-ci-archive-smoke',
+              samples:9,selectedNodes:['root'],complete:true,vector:Array(36).fill(.125)}],
+            visualVerified:false};
+          const stored=await call('/api/motion-history',{method:'POST',
+            headers:{authorization:'Bearer '+first,'content-type':'application/json'},
+            body:JSON.stringify(record)});
+          if(stored.stored!==true)throw Error('Synthetic history record was not stored');
+          const recovered=await read(second);
+          if(!recovered.records.some(x=>x.id===id))throw Error('Same-owner recovery session did not recover the record');
+          const other=await read(stranger);
+          if(other.records.some(x=>x.id===id)||other.records.length)
+            throw Error('Motion history leaked across owners');
+          console.log('CURRENT_ARCHIVE_OWNER_ISOLATION_PASS',{
+            privateArchive:health.privateArchive===true,
+            sourceScoped:true,sameOwnerRecovery:true,otherOwnerIsolated:true,
+            records:recovered.records.length
+          });
+          NODE
+
+
+  private-motion-history-unit-tests:
+    # The token is only used for an allow-listed sparse checkout; no private files are published.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: SpineAnimator/spine-animator-private
+          ref: b7fae91d10fc3118fdf19cf72803cad3e2a1fde7
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          path: private-motion-history
+          sparse-checkout: |
+            server/archive-handler.mjs
+            server/motion-history.mjs
+            server/generation-store.mjs
+            tests/archive-handler.test.cjs
+            tests/motion-history.test.cjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run private motion-history ownership and repository-visibility regressions
+        working-directory: private-motion-history
+        run: node --test tests/motion-history.test.cjs tests/archive-handler.test.cjs
+
+
+
+  private-sa-agent-regression-tests:
+    # Run the exact open SA Core PR head on an ephemeral public runner; never publish checked-out source.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: SpineAnimator/spine-animator-private
+          ref: 1604d9c751ab287c635c55661b12f191513dc82c
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          path: private-sa-agent
+          sparse-checkout: |
+            engine
+            package.json
+            package-lock.json
+            tests/sa-agent.test.cjs
+            tests/sa-production-adapters.test.cjs
+            tests/sa-edge-runtime.test.cjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: private-sa-agent/package-lock.json
+      - name: Install locked private-source dependencies
+        working-directory: private-sa-agent
+        run: npm ci
+      - name: Run SA DAG, adapter and Edge Runtime regression tests
+        working-directory: private-sa-agent
+        run: node --test tests/sa-agent.test.cjs tests/sa-production-adapters.test.cjs tests/sa-edge-runtime.test.cjs
+
+
   execute-private-checks:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -42,8 +178,10 @@ jobs:
             scripts/verify_volume360_editor_linux.py
             scripts/audit_volume360_visual.py
             scripts/create_editor360_review_sheets.py
+            scripts/audit_cherry360_art_quality.py
             tests/test_audit_volume360_visual.py
             tests/test_audit_volume360_review.py
+            tests/test_audit_cherry360_art_quality.py
           sparse-checkout-cone-mode: false
       - uses: actions/setup-python@v5
         with:
@@ -54,3 +192,4 @@ jobs:
           set -euo pipefail
           python -m pip install --disable-pip-version-check 'Pillow>=10.3,<14'
           python -m unittest discover -s tests -p 'test_audit_volume360_*.py'
+          python -m unittest discover -s tests -p 'test_audit_cherry360_art_quality.py'
