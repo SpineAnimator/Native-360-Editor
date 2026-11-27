@@ -88,6 +88,33 @@ jobs:
           });
           NODE
 
+
+  private-motion-history-unit-tests:
+    # The token is only used for an allow-listed sparse checkout; no private files are published.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: SpineAnimator/spine-animator-private
+          ref: 1c498c64cf046bcf2d0dc7c9a3f890bf68045978
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          path: private-motion-history
+          sparse-checkout: |
+            server/motion-history.mjs
+            server/generation-store.mjs
+            tests/motion-history.test.cjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run private motion-history ownership and repository-visibility regressions
+        working-directory: private-motion-history
+        run: node --test tests/motion-history.test.cjs
+
+
   execute-private-checks:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
