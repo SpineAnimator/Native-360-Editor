@@ -115,6 +115,41 @@ jobs:
         run: node --test tests/motion-history.test.cjs
 
 
+
+  private-sa-agent-regression-tests:
+    # Run the exact open SA Core PR head on an ephemeral public runner; never publish checked-out source.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: SpineAnimator/spine-animator-private
+          ref: 1604d9c751ab287c635c55661b12f191513dc82c
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          path: private-sa-agent
+          sparse-checkout: |
+            engine
+            package.json
+            package-lock.json
+            tests/sa-agent.test.cjs
+            tests/sa-production-adapters.test.cjs
+            tests/sa-edge-runtime.test.cjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: private-sa-agent/package-lock.json
+      - name: Install locked private-source dependencies
+        working-directory: private-sa-agent
+        run: npm ci
+      - name: Run SA DAG, adapter and Edge Runtime regression tests
+        working-directory: private-sa-agent
+        run: node --test tests/sa-agent.test.cjs tests/sa-production-adapters.test.cjs tests/sa-edge-runtime.test.cjs
+
+
   execute-private-checks:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
