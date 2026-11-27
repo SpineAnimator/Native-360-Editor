@@ -1,5 +1,8 @@
 name: Private Native 360 executor
 on:
+  pull_request:
+    paths:
+      - .github/workflows/runner.yml
   workflow_dispatch:
   repository_dispatch:
     types: [native-360-editor]
@@ -18,6 +21,7 @@ jobs:
           echo "Public ephemeral runner allocated: $RUNNER_NAME ($RUNNER_OS)"
           uname -s
   execute-private-checks:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -42,8 +46,10 @@ jobs:
             scripts/verify_volume360_editor_linux.py
             scripts/audit_volume360_visual.py
             scripts/create_editor360_review_sheets.py
+            scripts/audit_cherry360_art_quality.py
             tests/test_audit_volume360_visual.py
             tests/test_audit_volume360_review.py
+            tests/test_audit_cherry360_art_quality.py
           sparse-checkout-cone-mode: false
       - uses: actions/setup-python@v5
         with:
@@ -54,3 +60,4 @@ jobs:
           set -euo pipefail
           python -m pip install --disable-pip-version-check 'Pillow>=10.3,<14'
           python -m unittest discover -s tests -p 'test_audit_volume360_*.py'
+          python -m unittest discover -s tests -p 'test_audit_cherry360_art_quality.py'
